@@ -1,0 +1,11 @@
+# .gitignore
+# Ignorar archivos de datos sensibles (Protección de contribuyentes)
+data/
+*.pdf
+*.xlsx
+*.csv
+
+# Ignorar archivos temporales de Python
+__pycache__/
+*.pyc
+.env
