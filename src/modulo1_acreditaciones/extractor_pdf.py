@@ -1,42 +1,53 @@
-# src/modulo1_acreditaciones/extractor_pdf.py
 import pdfplumber
-import pandas as pd
 import logging
+import pandas as pd
+from .extractores.credicoop import extraer_credicoop
+from .extractores.galicia import extraer_galicia
+
+def detectar_banco(ruta_pdf):
+    """
+    Abre la primera página y busca palabras clave para decidir la estrategia.
+    """
+    try:
+        with pdfplumber.open(ruta_pdf) as pdf:
+            if not pdf.pages: return None
+            # Leemos solo la primera página para ser rápidos
+            texto_portada = pdf.pages[0].extract_text().upper()
+            
+            if "CREDICOOP" in texto_portada:
+                return "CREDICOOP"
+            elif "GALICIA" in texto_portada:
+                return "GALICIA"
+            else:
+                return "DESCONOCIDO"
+    except Exception as e:
+        logging.error(f"Error detectando banco: {e}")
+        return None
 
 def extraer_tabla_movimientos(ruta_pdf):
     """
-    Abre un PDF, detecta tablas en todas sus páginas y las une en un solo DataFrame.
+    Función principal llamada desde main.py
     """
-    datos_totales = []
+    banco = detectar_banco(ruta_pdf)
     
-    try:
-        # 'with' es un Context Manager: abre y cierra el archivo automáticamente (seguridad)
-        with pdfplumber.open(ruta_pdf) as pdf:
-            logging.info(f"Procesando PDF con {len(pdf.pages)} páginas.")
-            
-            for i, pagina in enumerate(pdf.pages):
-                # extract_table() busca líneas verticales y horizontales para definir celdas
-                tabla = pagina.extract_table()
-                
-                if tabla:
-                    # Si es la primera página, incluimos los encabezados (fila 0)
-                    # Si es la página 2, 3, etc., saltamos el encabezado para no repetirlo
-                    if i == 0:
-                        datos_totales.extend(tabla)
-                    else:
-                        # Asumimos que el encabezado se repite, lo saltamos (slice [1:])
-                        datos_totales.extend(tabla[1:])
-                else:
-                    logging.warning(f"No se detectaron tablas en la página {i+1}")
+    if banco == "CREDICOOP":
+        df = extraer_credicoop(ruta_pdf)
+    elif banco == "GALICIA":
+        df = extraer_galicia(ruta_pdf)
+    else:
+        logging.error(f"No se detectó un banco compatible para {ruta_pdf}")
+        return pd.DataFrame() # Devuelve vacío si falla
 
-        if not datos_totales:
-            raise ValueError("El PDF no contenía tablas legibles.")
-
-        # Convertimos la lista de listas en un DataFrame de Pandas
-        # La primera fila (índice 0) son las columnas
-        df = pd.DataFrame(datos_totales[1:], columns=datos_totales[0])
-        return df
-
-    except Exception as e:
-        logging.error(f"Error crítico extrayendo PDF: {e}")
-        return pd.DataFrame() # Retornamos vacío en caso de error para no romper el flujo
+    # --- FASE DE INTEGRIDAD (CHECKSUM) ---
+    if not df.empty:
+        total_creditos = df['Credito'].sum()
+        total_debitos = df['Debito'].sum()
+        logging.info(f"--- SUMAS DE CONTROL ({banco}) ---")
+        logging.info(f"Total Créditos detectados: $ {total_creditos}")
+        logging.info(f"Total Débitos detectados:  $ {total_debitos}")
+        
+        # Normalización final de columnas para que coincida con lo que espera el clasificador IA
+        # El clasificador espera 'DESCRIPCION_FINAL'
+        df = df.rename(columns={'Descripcion': 'DESCRIPCION_FINAL'})
+        
+    return df
