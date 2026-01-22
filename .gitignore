@@ -9,3 +9,9 @@ data/
 __pycache__/
 *.pyc
 .env
+
+# Entornos virtuales (ignoramos todas las variantes comunes)
+venv/
+.venv/
+env/
+.env
