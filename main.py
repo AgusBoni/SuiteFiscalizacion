@@ -1,73 +1,60 @@
 import os
 import logging
-import pandas as pd # Necesario para trucos de columnas
-from src.modulo1_acreditaciones.extractor_pdf import extraer_tabla_movimientos
-from src.modulo1_acreditaciones.clasificador_ia import ClasificadorMovimientos
+import pandas as pd
+from src.modulo1_acreditaciones import extractor_pdf
 
-# Configuración de logs
+# Configuración de Logs
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-def normalizar_columnas(df):
-    """
-    Intenta adivinar cuál columna es la descripción basándose en el contenido.
-    La columna de descripción suele ser la que tiene el texto más largo promedio.
-    """
-    columnas = df.columns.tolist()
-    logging.info(f"Columnas originales detectadas: {columnas}")
-    
-    columna_candidata = None
-    max_longitud_promedio = 0
-
-    for col in columnas:
-        # Convertimos a string y medimos longitud promedio
-        try:
-            longitud_promedio = df[col].astype(str).str.len().mean()
-            if longitud_promedio > max_longitud_promedio:
-                max_longitud_promedio = longitud_promedio
-                columna_candidata = col
-        except:
-            continue
-    
-    if columna_candidata:
-        logging.info(f"DETECTADO AUTOMÁTICAMENTE: La columna de descripción parece ser '{columna_candidata}'")
-        # Renombramos para que el resto del código siempre use el mismo nombre
-        df = df.rename(columns={columna_candidata: 'DESCRIPCION_FINAL'})
-        return df, True
-    else:
-        return df, False
-
 def main():
-    print("=== SUITE DE FISCALIZACIÓN INTELIGENTE: V2.0 ===")
+    print("\n=== SUITE DE FISCALIZACIÓN: MODO SOLO EXTRACCIÓN ===")
     
-    # 1. Definición de rutas (Asegúrate de que el nombre del PDF coincida con el que tienes en la carpeta)
-    archivo_pdf = "data/input/2024-01 CREDICOOP.pdf" 
-    archivo_salida = "data/output/reporte_fiscalizacion.xlsx"
-    
+    # RUTAS
+    archivo_pdf = "data/input/2024-01 CREDICOOP.pdf"
+    archivo_salida = "data/output/reporte_base_sin_clasificar.xlsx"
+
     if not os.path.exists(archivo_pdf):
-        logging.error(f"No encuentro el archivo: {archivo_pdf}")
+        logging.error(f"❌ No encuentro el archivo: {archivo_pdf}")
         return
 
-    # 2. Extracción
-    logging.info(f"Extrayendo: {archivo_pdf}...")
-    df_movimientos = extraer_tabla_movimientos(archivo_pdf)
-    
-    if df_movimientos.empty:
-        logging.error("La extracción falló (DataFrame vacío).")
+    # 1. EXTRACCIÓN
+    logging.info(f"📂 Leyendo PDF: {archivo_pdf}...")
+    try:
+        df_movimientos = extractor_pdf.extraer_tabla_movimientos(archivo_pdf)
+    except Exception as e:
+        logging.error(f"❌ Error al leer PDF: {e}")
         return
 
-    # 3. Normalización (El truco nuevo)
-    df_movimientos, exito = normalizar_columnas(df_movimientos)
-    
-    if not exito:
-        logging.error("No pudimos detectar automáticamente la columna de descripción.")
+    if df_movimientos is None or df_movimientos.empty:
+        logging.error("❌ El PDF se leyó pero no salieron datos (Tabla vacía).")
         return
+
+    # 2. PRUEBA DE FUEGO (SUMAS DE CONTROL)
+    total_creditos = df_movimientos['Credito'].sum()
+    total_debitos = df_movimientos['Debito'].sum()
+    count_filas = len(df_movimientos)
+
+    print("\n" + "="*50)
+    print(f"📊 REPORTE DE EXTRACCIÓN (Verificar contra PDF)")
+    print("="*50)
+    print(f"✅ Filas Extraídas:      {count_filas}")
+    print(f"💰 TOTAL CRÉDITOS (Entradas): $ {total_creditos:,.2f}")
+    print(f"💸 TOTAL DÉBITOS (Salidas):   $ {total_debitos:,.2f}")
+    print("="*50 + "\n")
+
+    # Verificación de Ceros
+    if total_creditos == 0 and total_debitos == 0:
+        logging.critical("🚨 ¡ALERTA! Los montos siguen en CERO. Revisa 'motor_base.py'.")
+    else:
+        logging.info("✅ Los montos parecen correctos (distintos de cero).")
+
+    # 3. GUARDADO (SIN IA)
+    # Comentamos la IA como pediste
+    # df_final = clasificador.clasificar(...) 
     
-    if 'df_final' not in locals():
-        df_final = df_movimientos 
-        # PASO 4: EXPORTACIÓN
-        print(f"Guardando reporte en: {archivo_salida}")
-        df_final.to_excel(archivo_salida, index=False) # Aquí es donde daba el error
-    logging.info(f"¡ÉXITO! Reporte guardado en: {archivo_salida}")
+    logging.info(f"💾 Guardando Excel base en: {archivo_salida}")
+    df_movimientos.to_excel(archivo_salida, index=False)
+    print("🚀 Listo para clasificación manual.")
 
 if __name__ == "__main__":
     main()

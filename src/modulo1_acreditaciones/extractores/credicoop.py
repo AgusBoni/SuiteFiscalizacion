@@ -1,73 +1,70 @@
 import pdfplumber
 import pandas as pd
-import logging
-from .motor_base import limpiar_moneda
+from decimal import Decimal
+from src.modulo1_acreditaciones.extractores.motor_base import limpiar_moneda # Usamos la función arreglada
 
-def extraer_credicoop(ruta_pdf):
-    logging.info("Iniciando motor de extracción: CREDICOOP")
-    datos = []
+def extraer_credicoop(pdf_path):
+    """
+    Extractor específico para CREDICOOP (Versión Robustecida)
+    """
+    data = []
     
-    # Ajustes calibrados para tu PDF de Credicoop
-    # x_tolerance=15 permite que textos separados por espacios cortos se unan
-    ajustes = {
+    # Configuración para leer tablas sin bordes (ajustable si falla)
+    ajustes_tabla = {
         "vertical_strategy": "text",
         "horizontal_strategy": "text",
         "snap_tolerance": 4,
     }
 
-    with pdfplumber.open(ruta_pdf) as pdf:
-        for i, pagina in enumerate(pdf.pages):
-            tabla = pagina.extract_table(ajustes)
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            # Extraemos tabla
+            table = page.extract_table(ajustes_tabla)
             
-            if not tabla: continue
-            
-            # Limpiamos filas vacías
-            tabla = [fila for fila in tabla if fila and any(fila)]
-            
-            # Estrategia de Encabezados:
-            # Buscamos la fila que contiene "DESCRIPCION" para saber dónde empiezan los datos
-            start_idx = -1
-            for idx, fila in enumerate(tabla):
-                # Unimos la fila en un texto para buscar la palabra clave
-                fila_str = " ".join([str(x) for x in fila if x]).upper()
-                if "DESCRIPCION" in fila_str and "FECHA" in fila_str:
-                    start_idx = idx + 1 # Los datos empiezan en la siguiente
-                    break
-            
-            if start_idx != -1:
-                # Si encontramos encabezado, tomamos desde ahí hacia abajo
-                filas_datos = tabla[start_idx:]
-            else:
-                # Si no hay encabezado (páginas siguientes), tomamos todo
-                # PERO cuidado con filas de "Saldo al..." o "Viene de..."
-                filas_datos = tabla
+            if table:
+                for row in table:
+                    # Filtramos filas vacías o muy cortas
+                    if not row or len(row) < 4:
+                        continue
+                    
+                    # Limpieza básica de Nones
+                    row = [elem if elem else "" for elem in row]
+                    
+                    # Lógica de detección de columnas (según PDF estándar de Credicoop)
+                    # Usualmente: Fecha [0], Concepto [1], Comprobante [2], Debito [3], Credito [4], Saldo [5]
+                    # A veces varía, pero buscamos patrones de fecha
+                    fecha = row[0]
+                    
+                    # Si la fecha parece fecha (dd/mm/aa)
+                    if "/" in str(fecha) and len(str(fecha)) <= 10:
+                        descripcion = row[1] + " " + row[2] # Unimos concepto y comprobante
+                        val_1 = limpiar_moneda(row[3])
+                        val_2 = limpiar_moneda(row[4])
 
-            for fila in filas_datos:
-                # El PDF Credicoop tiene 6 columnas aprox.
-                # FECHA | COMBTE | DESCRIPCION | DEBITO | CREDITO | SALDO
-                # A veces pdfplumber lee menos columnas si están vacías.
-                
-                # Descartamos filas basura (ej: "VIENE DE PAGINA...")
-                texto_fila = "".join([str(x) for x in fila if x])
-                if "VIENE DE" in texto_fila or "CONTINUA EN" in texto_fila or "SALDO AL" in texto_fila:
-                    continue
-                
-                # Normalización de longitud (Rellenamos con None si faltan columnas)
-                while len(fila) < 6:
-                    fila.append(None)
-                
-                # Mapeo específico según tu PDF
-                item = {
-                    'Fecha': fila[0],
-                    'Descripcion': fila[2], # Columna C
-                    'Debito': limpiar_moneda(fila[3]), # Columna D
-                    'Credito': limpiar_moneda(fila[4]), # Columna E
-                    'Banco': 'CREDICOOP'
-                }
-                
-                # Solo agregamos si hay fecha válida (filtro simple)
-                if item['Fecha'] and '/' in str(item['Fecha']):
-                    datos.append(item)
+                        # Analizamos la descripción para saber dónde poner la plata
+                        desc_lower = descripcion.lower()
+                        palabras_debito = ['impuesto', 'ley 25.413', 'iva', 'debito', 'pago', 'comision', 'extraccion', 'suscripcion', 'retencion', 'i.b.', 'sircreb']
 
-    df = pd.DataFrame(datos)
+                        # Si la descripción suena a gasto, forzamos que vaya a Débito
+                        if any(p in desc_lower for p in palabras_debito):
+                            debito = max(val_1, val_2) # Ponemos el valor aquí
+                            credito = Decimal("0.00")
+                        else:
+                            # Si no es gasto obvio, confiamos en la columna original (o ajustamos según necesites)
+                            # En tu caso, parece que TODO está cayendo en val_2 (row[4]), así que hay que tener cuidado.
+                            # Si val_1 es 0 y val_2 tiene dato, asumimos que es Crédito salvo que la descripción diga lo contrario.
+                            debito = val_1
+                            credito = val_2
+                        
+                        # Solo agregamos si hay movimiento de dinero
+                        if debito > 0 or credito > 0:
+                            data.append({
+                                "Fecha": fecha,
+                                "DESCRIPCION_FINAL": descripcion.strip(),
+                                "Debito": debito,
+                                "Credito": credito,
+                                "Banco": "CREDICOOP"
+                            })
+
+    df = pd.DataFrame(data)
     return df
