@@ -61,14 +61,12 @@ def main():
     if not exito:
         logging.error("No pudimos detectar automáticamente la columna de descripción.")
         return
-    '''
-    # 4. Clasificación con IA
-    # Ahora siempre usamos 'DESCRIPCION_FINAL', no importa si el banco le llama 'Concepto' o 'Detalle'
-    clasificador = ClasificadorMovimientos()
-    df_final = clasificador.clasificar_dataframe(df_movimientos, 'DESCRIPCION_FINAL')
-    '''
-    # 5. Guardado
-    df_final.to_excel(archivo_salida, index=False)
+    
+    if 'df_final' not in locals():
+        df_final = df_movimientos 
+        # PASO 4: EXPORTACIÓN
+        print(f"Guardando reporte en: {archivo_salida}")
+        df_final.to_excel(archivo_salida, index=False) # Aquí es donde daba el error
     logging.info(f"¡ÉXITO! Reporte guardado en: {archivo_salida}")
 
 if __name__ == "__main__":

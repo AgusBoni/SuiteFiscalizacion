@@ -1,38 +1,42 @@
-# src/modulo1_acreditaciones/extractores/motor_base.py
+import re
 from decimal import Decimal, InvalidOperation
-import logging
 
 def limpiar_moneda(valor):
     """
-    Convierte string '$ 1.500,00' -> Decimal('1500.00')
-    Maneja el formato Argentina/Latam: 
-    - Miles = Punto
-    - Decimales = Coma
+    Convierte strings de moneda argentina ($ 1.500,20) a Decimal(1500.20).
+    Soporta negativos y formatos sucios.
     """
     if not valor:
-        return Decimal('0.00')
+        return Decimal("0.00")
     
-    # Convertimos a string por seguridad y limpiamos espacios
-    v = str(valor).strip()
+    # 1. Convertimos a string y quitamos espacios extra
+    s = str(valor).strip()
     
-    # Quitamos símbolos de moneda y espacios internos
-    v = v.replace('$', '').replace(' ', '')
+    # 2. Quitamos todo lo que NO sea número, coma, punto o signo menos
+    #    Ej: "$ 173.491.540,11"  -> "173.491.540,11"
+    #    Ej: "USD 100" -> "100"
+    s_limpio = re.sub(r'[^\d.,-]', '', s)
     
-    # En caso de negativos con paréntesis (ej: (500,00)) -> -500.00
-    es_negativo = False
-    if '(' in v and ')' in v:
-        es_negativo = True
-        v = v.replace('(', '').replace(')', '')
-    elif '-' in v:
-        # A veces el menos está al final "500-"
-        es_negativo = True
-        v = v.replace('-', '')
+    if not s_limpio:
+        return Decimal("0.00")
 
-    # Reemplazo crítico: eliminar punto de miles, cambiar coma decimal por punto
-    v = v.replace('.', '').replace(',', '.')
-    
     try:
-        numero = Decimal(v)
-        return -numero if es_negativo else numero
-    except InvalidOperation:
-        return Decimal('0.00')
+        # 3. Lógica de detección de formato Argentina/España (1.000,00)
+        # Si tiene puntos y comas, asumimos que el punto es miles y la coma decimal.
+        if '.' in s_limpio and ',' in s_limpio:
+            s_limpio = s_limpio.replace('.', '') # Borramos los miles (173491540,11)
+            s_limpio = s_limpio.replace(',', '.') # Cambiamos coma por punto decimal (173491540.11)
+        
+        # Si solo tiene coma (120,50), es decimal seguro en formato AR
+        elif ',' in s_limpio:
+            s_limpio = s_limpio.replace(',', '.')
+            
+        # Si tiene múltiples puntos (1.200.500), son miles seguro.
+        elif s_limpio.count('.') > 1:
+            s_limpio = s_limpio.replace('.', '')
+
+        return Decimal(s_limpio)
+        
+    except (InvalidOperation, ValueError):
+        # Si falla algo extremo, devolvemos 0 para no romper el programa
+        return Decimal("0.00")
