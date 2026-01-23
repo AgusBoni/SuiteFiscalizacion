@@ -61,12 +61,12 @@ def main():
     if not exito:
         logging.error("No pudimos detectar automáticamente la columna de descripción.")
         return
-
+    '''
     # 4. Clasificación con IA
     # Ahora siempre usamos 'DESCRIPCION_FINAL', no importa si el banco le llama 'Concepto' o 'Detalle'
     clasificador = ClasificadorMovimientos()
     df_final = clasificador.clasificar_dataframe(df_movimientos, 'DESCRIPCION_FINAL')
-
+    '''
     # 5. Guardado
     df_final.to_excel(archivo_salida, index=False)
     logging.info(f"¡ÉXITO! Reporte guardado en: {archivo_salida}")
